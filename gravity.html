@@ -1,0 +1,334 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+</head>
+<body>
+    <style>
+        canvas {
+            background-color: white;
+        }
+    </style>
+    <canvas id="game" width="1500" height="695"></canvas>
+<script>
+    // Define simulation constants
+    const fpsDisplay = 60;   // frequency to update display (frames per second)
+    const fpsSimulation = 1000; // frequency to update simulation (frames per second)
+
+    const numBalls = 4;
+    const G = 700;  // Gravitational constant
+    const K = 50;  // Electrostatic constant
+    const initialMaxVelocity = 400;  // pixels/s
+    const maxMass = 80;
+    const minMass = 10;
+    const bounceBehavior = true;
+    const collisionDistance = .6;
+
+    // Get canvas and context
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    // Global Variabls
+    var simIntervalms = 1000 / fpsSimulation;
+    var dispIntervalms = 1000 / fpsDisplay;
+    var velocityScale = 1 / fpsSimulation;
+    var scaledMaxVelocity = initialMaxVelocity;
+
+    // Set up ball array
+    var balls = [];
+    for (var i = 0; i < numBalls; i++) {
+        var thisMass = Math.pow(Math.random(), 3) * (maxMass - minMass) + minMass;
+        var thisRadius = Math.pow(thisMass, (1 / 3)) * 5;
+
+        balls.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            fx: 0.0,
+            fy: 0.0,
+            vx: Math.random() * initialMaxVelocity - initialMaxVelocity / 2,
+            vy: Math.random() * initialMaxVelocity - initialMaxVelocity / 2,
+            mass: thisMass,
+            radius: thisRadius,
+            color: "black"
+        });
+    };
+
+    normalizeMomentum();
+
+    let simInterval = setInterval(updateSim, simIntervalms);
+    let dispInterval = setInterval(draw, dispIntervalms);
+
+// Supporting methods...
+
+    function updateSim() {
+        moveBalls();
+    }
+
+    function draw() {
+        //var pe = getTotalPotentialEnergy();
+        //var ke = getTotalKineticEnergy();
+        //var te = pe + ke;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawBalls();
+        //drawValue("PE: " + pe, 1);
+        //drawValue("KE: " + ke, 2);
+        //drawValue("TE: " + te, 3);
+    }
+
+    function normalizeMomentum() {
+        var totalMx = 0.0;
+        var totalMy = 0.0;
+
+        // Get total initial momentum in x and y directions
+        for (var i = 0; i < numBalls; i++) {
+            totalMx += balls[i].vx * balls[i].mass;
+            totalMy += balls[i].vy * balls[i].mass;
+        }
+        
+        // Get avg momentum in x and y directions
+        var avgMx = totalMx / numBalls;
+        var avgMy = totalMy / numBalls;
+
+        // Adjust ball momentum by average so system momentum goes to zero
+        for (var i = 0; i < numBalls; i++) {
+            balls[i].vx -= avgMx / balls[i].mass;
+            balls[i].vy -= avgMy / balls[i].mass;
+        }
+    }
+
+    function drawBalls() {
+        for (var i = 0; i < numBalls; i++) {
+            ctx.beginPath();
+            ctx.arc(balls[i].x, balls[i].y, balls[i].radius, 0, Math.PI * 2);
+            ctx.fillStyle = balls[i].color;
+            ctx.fill();
+            ctx.closePath();
+        }
+    }
+
+    function moveBalls() {
+        fixCollisions();
+        setAccellerations();
+        setVelocities();
+        handleWallCollisions();
+        setPositions();
+    }
+
+    function setAccellerations() {
+        // Calculate net force for each ball exerted by the other balls
+        var force;
+        var gforce;
+        var rforce;
+        var angle;
+        var fx;
+        var fy;
+        
+        // Zero out all forces in preparation to get total
+        for (var i = 0; i < numBalls; i++) {
+            balls[i].ax = 0.0;
+            balls[i].ay = 0.0;
+        }
+
+        // Sum up x and y forces between all pairs
+        for (var i = 0; i < numBalls - 1; i++) {
+            for (var j = i + 1; j < numBalls; j++) {
+                var ball1 = balls[i];
+                var ball2 = balls[j];
+
+                // Gravatational attraction
+                gforce = getGravitationalForce(ball1, ball2);
+
+                // Eletrostatic repulsion
+                rforce = getRepulsion(ball1, ball2);
+
+                // Sum the forces
+                force = gforce - rforce;
+
+                // Get x and y components of force based on angle
+                angle = getAngle(ball1, ball2);
+                fx = force * Math.cos(angle);
+                fy = force * Math.sin(angle);
+
+                // f = ma, so increment each ball's x & y accelleration as a = f/m
+                ball1.ax += fx / ball1.mass;
+                ball2.ax -= fx / ball2.mass;
+                ball1.ay += fy / ball1.mass;
+                ball2.ay -= fy / ball2.mass;
+            }
+        }
+    }
+
+    function setVelocities() {
+        for (var i = 0; i < numBalls; i++) {
+            balls[i].vx += balls[i].ax;
+            balls[i].vy += balls[i].ay;
+        }
+    }
+
+    function setPositions() {
+        for (var i = 0; i < numBalls; i++) {
+            balls[i].x += velocityScale * balls[i].vx;
+            balls[i].y += velocityScale * balls[i].vy;
+        }
+    }
+
+    function fixCollisions() {
+        // If after setting their positions, if two balls are overlapping, back them off by half of the overlap + 1 pixel
+        for (var i = 0; i < numBalls - 1; i++) {
+            for (var j = i + 1; j < numBalls; j++) {
+                var ball1 = balls[i];
+                var ball2 = balls[j];
+
+                // Test if overlap.  If distance between centers minus the sum of the radii < 1 pixel, consider it touching or overlapping.
+                if (getCenterDistance(ball1, ball2) - ball1.radius - ball2.radius < collisionDistance) {
+                    var overlap = ball1.radius + ball2.radius - Math.sqrt(getCenterDistanceSquared(ball1, ball2)) + (collisionDistance * 2); // <-- the +2 gets us +1 pixel after dividing by 2 later
+                    var overlapAngle = Math.atan2(ball2.y - ball1.y, ball2.x - ball1.x);
+                    var overlapX = overlap * Math.cos(overlapAngle) / 2;
+                    var overlapY = overlap * Math.sin(overlapAngle) / 2;
+
+                    ball1.x -= overlapX;
+                    ball1.y -= overlapY;
+                    ball2.x += overlapX;
+                    ball2.y += overlapY;
+
+                    // Recurse in case we the above cause a different overlap
+                    fixCollisions();
+                }
+            }
+        }
+    }
+
+    function getGravitationalForce(ball1, ball2) {
+        return (G * ball1.mass * ball2.mass) / getCenterDistanceSquared(ball1, ball2);
+    }
+
+    function getRepulsion(ball1, ball2) {
+        return (K * ball1.mass * ball2.mass) / getEdgeDistanceSquared(ball1, ball2);
+    }
+
+    function getAngle(ball1, ball2) {
+        return Math.atan2(ball2.y - ball1.y, ball2.x - ball1.x);
+    }
+
+    function getCenterDistanceSquared(ball1, ball2) {
+        return (ball2.x - ball1.x)**2 + (ball2.y - ball1.y)**2;
+    }
+
+    function getCenterDistance(ball1, ball2) {
+        return Math.sqrt(getCenterDistanceSquared(ball1, ball2));
+    }
+
+    function getEdgeDistance(ball1, ball2) {
+        return Math.sqrt(getEdgeDistanceSquared(ball1, ball2));
+    }
+
+    function getEdgeDistanceSquared(ball1, ball2) {
+        return (Math.sqrt(getCenterDistanceSquared(ball1, ball2)) - ball1.radius - ball2.radius)**2;
+    }
+
+    function handleWallCollisions() {
+        if (bounceBehavior == true) {
+            bounceVelocities();
+        } else {
+            wrapWalls();
+        }
+    }
+
+    function bounceVelocities() {
+        // detect if ball has hit the border
+        for (var i = 0; i < numBalls; i++) {
+
+            // Just stop at wall
+            if (balls[i].x < balls[i].radius) {
+                balls[i].vx = -balls[i].vx;
+                balls[i].x = balls[i].radius;
+            }
+            if (balls[i].y < balls[i].radius) {
+                balls[i].vy = -balls[i].vy;
+                balls[i].y = balls[i].radius;
+            }
+            if (balls[i].x > canvas.width - balls[i].radius) {
+                balls[i].vx = -balls[i].vx;
+                balls[i].x = canvas.width - balls[i].radius;
+            }
+            if (balls[i].y > canvas.height - balls[i].radius) {
+                balls[i].vy = -balls[i].vy;
+                balls[i].y = canvas.height - balls[i].radius;
+            }
+        }
+    }
+
+    function wrapWalls() {
+        // detect if ball has hit the border
+        for (var i = 0; i < numBalls; i++) {
+        
+            // Just stop at wall
+            if (balls[i].x < 0) {
+                balls[i].x = canvas.width;
+            }
+            if (balls[i].y < 0) {
+                balls[i].y = canvas.height;
+            }
+            if (balls[i].x > canvas.width) {
+                balls[i].x = 0;
+            }
+            if (balls[i].y > canvas.height) {
+                balls[i].y = 0;
+            }
+        }
+    }
+
+    function getTotalMomentum() {
+        var momentum = 0;
+        for (var i = 0; i < numBalls; i++) {
+            momentum += Math.sqrt(balls[i].vx ** 2 + balls[i].vy ** 2) * balls[i].mass;
+        }
+        return momentum;
+    }
+
+    function getTotalKineticEnergy() {
+        var ke = 0;
+        for (var i = 0; i < numBalls; i++) {
+            ke += 0.5 * balls[i].mass * (balls[i].vx ** 2 + balls[i].vy ** 2);
+        }
+        return ke;
+    }
+
+    function getTotalPotentialEnergy() {
+        var pe = 0;
+
+        // Find CG
+        var xcg = 0;
+        var ycg = 0;
+        var totalMass = 0;
+        for (var i = 0; i < numBalls; i++) {
+            xcg += balls[i].x * balls[i].mass;
+            ycg += balls[i].y * balls[i].mass;
+            totalMass += balls[i].mass;
+        }
+        xcg = xcg / totalMass;
+        ycg = ycg / totalMass;
+
+        // Find total PE
+        for (var i = 0; i < numBalls - 1; i++) {
+            //pe += balls[i].mass * G * Math.abs((balls[i].x - xcg));
+            //pe += balls[i].mass * G * Math.abs((balls[i].y - ycg));
+            //pe -= balls[i].mass * K * Math.abs((balls[i].x - xcg));
+            //pe -= balls[i].mass * K * Math.abs((balls[i].y - ycg));
+
+            pe += balls[0].mass * balls[1].mass * -G / Math.sqrt((balls[0].x - balls[1].x) ** 2 + (balls[0].y - balls[1].x) ** 2); // Distance from CG * mass * G
+            //pe -= balls[i].mass * K / Math.sqrt(((balls[i].x - xcg - balls[i].radius) ** 2 + (balls[i].y - ycg - balls[i].radius) ** 2));
+        }
+        return pe;
+    }
+
+    function drawValue(value, line) {
+        ctx.font = "20px Arial";
+        ctx.fillText(value, canvas.width / 2 - 20, line * 30);
+    }
+
+</script>
+</body>
+</html>
