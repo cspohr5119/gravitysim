@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -17,10 +17,10 @@
     const fpsDisplay = 60;   // frequency to update display (frames per second)
     const fpsSimulation = 1000; // frequency to update simulation (frames per second)
 
-    const numBalls = 4;
+    const numBalls = 2;
     const G = 700;  // Gravitational constant
     const K = 50;  // Electrostatic constant
-    const initialMaxVelocity = 400;  // pixels/s
+    const initialMaxVelocity = 0;  // pixels/s
     const maxMass = 80;
     const minMass = 10;
     const bounceBehavior = true;
@@ -35,6 +35,12 @@
     var dispIntervalms = 1000 / fpsDisplay;
     var velocityScale = 1 / fpsSimulation;
     var scaledMaxVelocity = initialMaxVelocity;
+    var ballsXMomentum = 0;
+    var ballsYMomentum = 0
+    var containerXMomentum = 0;
+    var containerYMomentum = 0;
+    var cm = { x: 0.0, y: 0.0, radius: 0.0 };
+    var maxKE = 0.0;
 
     // Set up ball array
     var balls = [];
@@ -67,14 +73,21 @@
     }
 
     function draw() {
-        //var pe = getTotalPotentialEnergy();
-        //var ke = getTotalKineticEnergy();
-        //var te = pe + ke;
+        var pe = getTotalPotentialEnergy();
+        var ke = getTotalKineticEnergy();
+        var te = pe + ke;
+        if (ke > maxKE) maxKE = ke;
+
+        updateBallsMomentum();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawBalls();
-        //drawValue("PE: " + pe, 1);
-        //drawValue("KE: " + ke, 2);
-        //drawValue("TE: " + te, 3);
+        drawValue("Mx: " + Math.round(ballsXMomentum + containerXMomentum, 2), 1);
+        drawValue("My: " + Math.round(ballsYMomentum + containerYMomentum, 2), 2);
+        drawValue("Ek: " + Math.round(ke, 2), 3);
+        drawValue("Ep: " + Math.round(pe, 2), 4);
+        drawValue("Et: " + Math.round(te, 2), 5);
+        drawValue("Ekmax: " + Math.round(maxKE, 2), 6);
+
     }
 
     function normalizeMomentum() {
@@ -106,6 +119,13 @@
             ctx.fill();
             ctx.closePath();
         }
+
+        ctx.beginPath();
+        ctx.arc(cm.x, cm.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'black';
+        ctx.fill();
+        ctx.closePath();
+
     }
 
     function moveBalls() {
@@ -240,22 +260,26 @@
         // detect if ball has hit the border
         for (var i = 0; i < numBalls; i++) {
 
-            // Just stop at wall
+            // Just reverse direction at wall
             if (balls[i].x < balls[i].radius) {
                 balls[i].vx = -balls[i].vx;
                 balls[i].x = balls[i].radius;
+                containerXMomentum -= 2 * balls[i].vx * balls[i].mass;
             }
             if (balls[i].y < balls[i].radius) {
                 balls[i].vy = -balls[i].vy;
                 balls[i].y = balls[i].radius;
+                containerYMomentum -= 2 * balls[i].vy * balls[i].mass;
             }
             if (balls[i].x > canvas.width - balls[i].radius) {
                 balls[i].vx = -balls[i].vx;
                 balls[i].x = canvas.width - balls[i].radius;
+                containerXMomentum -= 2 * balls[i].vx * balls[i].mass;
             }
             if (balls[i].y > canvas.height - balls[i].radius) {
                 balls[i].vy = -balls[i].vy;
                 balls[i].y = canvas.height - balls[i].radius;
+                containerYMomentum -= 2 * balls[i].vy * balls[i].mass;
             }
         }
     }
@@ -280,46 +304,48 @@
         }
     }
 
-    function getTotalMomentum() {
-        var momentum = 0;
+    function updateBallsMomentum() {
+        ballsXMomentum = 0;
+        ballsYMomentum = 0;
         for (var i = 0; i < numBalls; i++) {
-            momentum += Math.sqrt(balls[i].vx ** 2 + balls[i].vy ** 2) * balls[i].mass;
+            ballsXMomentum += balls[i].vx * balls[i].mass;
+            ballsYMomentum += balls[i].vy * balls[i].mass;
         }
-        return momentum;
     }
 
     function getTotalKineticEnergy() {
         var ke = 0;
         for (var i = 0; i < numBalls; i++) {
-            ke += 0.5 * balls[i].mass * (balls[i].vx ** 2 + balls[i].vy ** 2);
+            ke += 0.5 * balls[i].mass * (balls[i].vx ** 2 + balls[i].vy ** 2);     //KE = 1/2 mv*2;
         }
         return ke;
     }
 
     function getTotalPotentialEnergy() {
-        var pe = 0;
-
-        // Find CG
-        var xcg = 0;
-        var ycg = 0;
-        var totalMass = 0;
-        for (var i = 0; i < numBalls; i++) {
-            xcg += balls[i].x * balls[i].mass;
-            ycg += balls[i].y * balls[i].mass;
-            totalMass += balls[i].mass;
+        // Find CM
+        var xm = 0.0;
+        var ym = 0.0;
+        var tm = 0.0;
+        for (i = 0; i < numBalls; i++) {
+            xm += balls[i].x * balls[i].mass;
+            ym += balls[i].y * balls[i].mass;
+            tm += balls[i].mass;
         }
-        xcg = xcg / totalMass;
-        ycg = ycg / totalMass;
+        cm.x = xm / tm;
+        cm.y = ym / tm;
 
-        // Find total PE
-        for (var i = 0; i < numBalls - 1; i++) {
-            //pe += balls[i].mass * G * Math.abs((balls[i].x - xcg));
-            //pe += balls[i].mass * G * Math.abs((balls[i].y - ycg));
-            //pe -= balls[i].mass * K * Math.abs((balls[i].x - xcg));
-            //pe -= balls[i].mass * K * Math.abs((balls[i].y - ycg));
+        // Find total PE from every ball to cm
+        var pe = 0;
+        for (var i = 0; i < numBalls; i++) {
+            //pe += -G * balls[i].mass / getCenterDistance(balls[i], cm);        // PE = -Gm1m2/r
+            //pe += K * balls[i].mass / getEdgeDistance(balls[i], cm);           // PE = Km1m2/r
 
-            pe += balls[0].mass * balls[1].mass * -G / Math.sqrt((balls[0].x - balls[1].x) ** 2 + (balls[0].y - balls[1].x) ** 2); // Distance from CG * mass * G
-            //pe -= balls[i].mass * K / Math.sqrt(((balls[i].x - xcg - balls[i].radius) ** 2 + (balls[i].y - ycg - balls[i].radius) ** 2));
+            for (var j = 0; j < numBalls; j++) {
+                if (i != j) {
+                    pe += -G * balls[i].mass * balls[j].mass / getCenterDistance(balls[i], cm);        // PE = -Gm1m2/r
+                    pe += K * balls[i].mass * balls[j].mass / getEdgeDistance(balls[i], cm);           // PE = Km1m2/r
+                }
+            }
         }
         return pe;
     }
